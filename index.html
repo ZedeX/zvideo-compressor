@@ -1,0 +1,2391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>视频压缩工具 - WebCodecs 纯前端转码</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-foreground: #ffffff;
+      --background: #0a0a0b;
+      --foreground: #fafafa;
+      --muted: #27272a;
+      --muted-foreground: #a1a1aa;
+      --border: #27272a;
+      --card: #18181b;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    /* 视频预览容器 */
+    .video-preview-container {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .video-preview-container video,
+    .video-preview-container canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    /* 视频对比滑块 */
+    .video-compare-container {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .video-compare-container .video-left,
+    .video-compare-container .video-right {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .video-compare-container .video-left {
+      z-index: 1;
+    }
+
+    .video-compare-container .video-right {
+      z-index: 2;
+      clip-path: inset(0 0 0 50%);
+    }
+
+    .video-compare-container video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .compare-slider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: white;
+      z-index: 10;
+      cursor: ew-resize;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .compare-slider::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px;
+      height: 40px;
+      background: white;
+      border-radius: 50%;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+
+    .compare-slider::after {
+      content: '⟷';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 18px;
+      color: #333;
+      font-weight: bold;
+    }
+
+    /* 标签 */
+    .video-label {
+      position: absolute;
+      bottom: 12px;
+      padding: 4px 12px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 4px;
+      z-index: 5;
+    }
+
+    .video-label.left { left: 12px; }
+    .video-label.right { right: 12px; }
+
+    /* 进度蒙版 */
+    .progress-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    .progress-overlay .processed {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      background: transparent;
+      border-right: 3px solid white;
+    }
+
+    .progress-overlay .unprocessed {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.6);
+    }
+
+    /* 进度文字 */
+    .progress-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: 600;
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    /* 后台处理提示 */
+    .background-notice {
+      position: fixed;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(234, 179, 8, 0.9);
+      color: #000;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .background-notice.show {
+      display: flex;
+    }
+
+    /* 更换视频按钮 */
+    .change-video-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 20;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .change-video-btn:hover {
+      background: rgba(99, 102, 241, 0.8);
+      border-color: rgba(99, 102, 241, 1);
+    }
+
+    /* 播放控制按钮 */
+    .play-control-btn {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .play-control-btn:hover {
+      background: rgba(99, 102, 241, 0.8);
+    }
+
+    /* 上传区域 */
+    .upload-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 48px;
+      border: 2px dashed #3f3f46;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .upload-zone:hover {
+      border-color: #6366f1;
+      background: rgba(99, 102, 241, 0.05);
+    }
+
+    .upload-zone.drag-over {
+      border-color: #6366f1;
+      background: rgba(99, 102, 241, 0.1);
+    }
+
+    /* 滑块样式 */
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      background: #27272a;
+      border-radius: 3px;
+      outline: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: #6366f1;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* 动画 */
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .animate-spin { animation: spin 1s linear infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .animate-pulse { animation: pulse 2s ease-in-out infinite; }
+
+    /* 隐藏文件输入 */
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <!-- 后台处理提示 -->
+  <div id="backgroundNotice" class="background-notice">
+    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <span>转码正在后台进行中，请保持此标签页打开</span>
+  </div>
+
+  <!-- Header -->
+  <header class="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md">
+    <div class="max-w-6xl mx-auto flex h-16 items-center justify-between px-4">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 shadow-lg">
+          <svg class="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold">视频压缩工具</h1>
+          <p class="text-xs text-zinc-400">WebCodecs 纯前端转码</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div id="browserSupport" class="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm border border-green-500/30 bg-green-500/10 text-green-500">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          <span>WebCodecs 支持</span>
+        </div>
+
+        <button id="gpuInfoBtn" class="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm border border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-indigo-500 transition-colors cursor-pointer">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+          </svg>
+          <span id="gpuInfoText">检测 GPU...</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- GPU 信息弹窗 -->
+  <div id="gpuModal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-lg w-full mx-4 shadow-2xl">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+          <svg class="h-5 w-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+          </svg>
+          GPU 硬件信息
+        </h3>
+        <button id="closeGpuModal" class="text-zinc-400 hover:text-white transition-colors">
+          <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="gpuModalContent" class="space-y-4"></div>
+      <div class="mt-6 pt-4 border-t border-zinc-700">
+        <p class="text-xs text-zinc-500">💡 提示：浏览器无法直接选择使用哪个 GPU。如需使用 NVIDIA 显卡加速，请在系统设置中将浏览器设置为使用"高性能 GPU"。</p>
+      </div>
+    </div>
+  </div>
+
+  <main class="max-w-6xl mx-auto px-4 py-8">
+    <!-- 特性标签 -->
+    <div class="mb-8 flex flex-wrap items-center justify-center gap-3">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-zinc-800 text-zinc-300">
+        <svg class="h-4 w-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        GPU 加速
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-zinc-800 text-zinc-300">
+        <svg class="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/>
+        </svg>
+        本地处理
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-zinc-800 text-zinc-300">
+        <svg class="h-4 w-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+        </svg>
+        高效压缩
+      </span>
+    </div>
+
+    <!-- 主标题 -->
+    <div class="mb-8 text-center">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">纯前端视频压缩</h2>
+      <p class="mt-2 text-zinc-400">使用 WebCodecs API + mp4-muxer，视频不离开您的设备，100% 隐私安全</p>
+    </div>
+
+    <!-- 主要内容区 -->
+    <div class="grid gap-6 lg:grid-cols-[1fr,360px]">
+      <!-- 左侧：视频区域 -->
+      <div class="space-y-6">
+        <!-- 上传区域 -->
+        <div id="uploadSection" class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+          <div id="dropZone" class="upload-zone">
+            <div class="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-500/10">
+              <svg class="h-8 w-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+              </svg>
+            </div>
+            <div class="text-center">
+              <p class="text-lg font-medium">拖放视频文件到这里</p>
+              <p class="text-sm text-zinc-400">或点击选择文件</p>
+            </div>
+            <button class="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-colors">
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+              </svg>
+              选择视频文件
+            </button>
+            <p class="text-xs text-zinc-500">支持 MP4, WebM, MOV 等常见格式</p>
+            <input type="file" id="fileInput" accept="video/*" class="hidden">
+          </div>
+        </div>
+
+        <!-- 视频预览区域 -->
+        <div id="videoPreviewSection" class="hidden">
+          <div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+            <!-- 视频预览 -->
+            <div id="previewContainer" class="video-preview-container">
+              <canvas id="previewCanvas"></canvas>
+              <video id="previewVideo" class="hidden" muted></video>
+
+              <!-- 更换视频按钮 -->
+              <button id="changeVideoBtn" class="change-video-btn">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                更换视频
+              </button>
+
+              <!-- 进度蒙版 -->
+              <div id="progressOverlay" class="progress-overlay hidden">
+                <div id="processedArea" class="processed"></div>
+                <div id="unprocessedArea" class="unprocessed"></div>
+                <div id="progressText" class="progress-text">
+                  <span id="progressPercent">0%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 视频对比区域（压缩完成后显示） -->
+            <div id="compareContainer" class="video-compare-container hidden">
+              <div class="video-left">
+                <video id="originalCompareVideo" muted loop></video>
+                <span class="video-label left">原始视频</span>
+              </div>
+              <div class="video-right" id="videoRight">
+                <video id="compressedCompareVideo" muted loop></video>
+                <span class="video-label right">压缩后</span>
+              </div>
+              <div id="compareSlider" class="compare-slider"></div>
+              <button id="playPauseBtn" class="play-control-btn">
+                <svg id="playIcon" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                  <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span id="playPauseText">播放对比</span>
+              </button>
+            </div>
+
+            <!-- 视频信息 -->
+            <div class="p-4 border-t border-zinc-800">
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p class="text-zinc-500">文件大小</p>
+                  <p id="fileSize" class="font-medium">-</p>
+                </div>
+                <div>
+                  <p class="text-zinc-500">时长</p>
+                  <p id="duration" class="font-medium">-</p>
+                </div>
+                <div>
+                  <p class="text-zinc-500">分辨率</p>
+                  <p id="resolution" class="font-medium">-</p>
+                </div>
+                <div>
+                  <p class="text-zinc-500">比特率</p>
+                  <p id="bitrate" class="font-medium">-</p>
+                </div>
+              </div>
+
+              <!-- 压缩结果 -->
+              <div id="resultInfo" class="hidden mt-4 p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="font-medium text-green-400">压缩完成</p>
+                    <p id="sizeComparison" class="text-sm text-zinc-400">-</p>
+                  </div>
+                  <div class="text-right">
+                    <p id="reductionPercent" class="text-2xl font-bold text-green-500">-0%</p>
+                    <p id="savedSize" class="text-xs text-zinc-400">节省 0 MB</p>
+                  </div>
+                </div>
+                <button id="downloadBtn" class="w-full mt-4 bg-indigo-500 hover:bg-indigo-600 text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors">
+                  <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                  </svg>
+                  下载压缩后的视频
+                </button>
+                <button id="newVideoBtn" class="w-full mt-2 bg-zinc-700 hover:bg-zinc-600 text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors">
+                  <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                  </svg>
+                  选择新视频
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧：设置面板 -->
+      <div class="space-y-6">
+        <!-- 压缩设置 -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl">
+          <div class="p-4 border-b border-zinc-800">
+            <h3 class="font-semibold flex items-center gap-2">
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+              压缩设置
+            </h3>
+          </div>
+
+          <div class="p-4 space-y-6">
+            <!-- 平台快捷选项 -->
+            <div class="space-y-3">
+              <label class="text-sm font-medium flex items-center gap-2">
+                <svg class="h-4 w-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l1.1 1.1"/>
+                </svg>
+                分享到平台
+              </label>
+              <div class="grid grid-cols-4 gap-2">
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="wechat_moments" title="朋友圈视频建议30秒内">
+                  <span class="text-lg">💬</span>
+                  <span class="block text-xs mt-1">朋友圈</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="wechat_chat" title="微信群聊/私聊">
+                  <span class="text-lg">👥</span>
+                  <span class="block text-xs mt-1">微信</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="xiaohongshu" title="小红书支持4K/60fps">
+                  <span class="text-lg">📕</span>
+                  <span class="block text-xs mt-1">小红书</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="tiktok" title="抖音/TikTok">
+                  <span class="text-lg">🎵</span>
+                  <span class="block text-xs mt-1">抖音</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="kuaishou" title="快手">
+                  <span class="text-lg">🎬</span>
+                  <span class="block text-xs mt-1">快手</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="weibo" title="微博">
+                  <span class="text-lg">📰</span>
+                  <span class="block text-xs mt-1">微博</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="bilibili" title="B站支持8K/120fps">
+                  <span class="text-lg">📺</span>
+                  <span class="block text-xs mt-1">B站</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="youtube" title="YouTube支持8K">
+                  <span class="text-lg">▶️</span>
+                  <span class="block text-xs mt-1">YouTube</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="twitter" title="Twitter/X">
+                  <span class="text-lg">🐦</span>
+                  <span class="block text-xs mt-1">X/Twitter</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="instagram" title="Instagram">
+                  <span class="text-lg">📸</span>
+                  <span class="block text-xs mt-1">Instagram</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="discord" title="Discord">
+                  <span class="text-lg">🎮</span>
+                  <span class="block text-xs mt-1">Discord</span>
+                </button>
+                <button class="platform-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-indigo-500 hover:bg-indigo-500/5" data-platform="telegram" title="Telegram支持2GB">
+                  <span class="text-lg">✈️</span>
+                  <span class="block text-xs mt-1">Telegram</span>
+                </button>
+              </div>
+              <p id="platformHint" class="text-xs text-zinc-500 hidden"></p>
+            </div>
+
+            <hr class="border-zinc-800">
+
+            <!-- 文件大小限制 -->
+            <div class="space-y-3">
+              <label class="text-sm font-medium flex items-center gap-2">
+                <svg class="h-4 w-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+                文件大小限制
+              </label>
+              <div class="grid grid-cols-4 gap-2">
+                <button class="size-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-green-500 hover:bg-green-500/5" data-maxsize="10">
+                  <span class="font-medium text-sm">10MB</span>
+                </button>
+                <button class="size-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-green-500 hover:bg-green-500/5" data-maxsize="20">
+                  <span class="font-medium text-sm">20MB</span>
+                </button>
+                <button class="size-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-green-500 hover:bg-green-500/5" data-maxsize="50">
+                  <span class="font-medium text-sm">50MB</span>
+                </button>
+                <button class="size-btn p-2 rounded-lg border border-zinc-700 text-center transition-all hover:border-green-500 hover:bg-green-500/5" data-maxsize="100">
+                  <span class="font-medium text-sm">100MB</span>
+                </button>
+              </div>
+              <p id="sizeHint" class="text-xs text-zinc-500 hidden"></p>
+            </div>
+
+            <hr class="border-zinc-800">
+
+            <!-- 质量预设 -->
+            <div class="space-y-3">
+              <label class="text-sm font-medium">压缩质量</label>
+              <div class="grid grid-cols-2 gap-2">
+                <button class="preset-btn h-auto flex-col items-start p-3 rounded-lg border border-zinc-700 text-left transition-all hover:border-indigo-500" data-preset="low">
+                  <span class="font-medium">高压缩</span>
+                  <span class="text-xs text-zinc-400">文件最小</span>
+                </button>
+                <button class="preset-btn h-auto flex-col items-start p-3 rounded-lg border border-indigo-500 bg-indigo-500/10 text-left transition-all" data-preset="medium">
+                  <span class="font-medium">平衡</span>
+                  <span class="text-xs text-zinc-400">质量与大小平衡</span>
+                </button>
+                <button class="preset-btn h-auto flex-col items-start p-3 rounded-lg border border-zinc-700 text-left transition-all hover:border-indigo-500" data-preset="high">
+                  <span class="font-medium">高质量</span>
+                  <span class="text-xs text-zinc-400">接近原画质</span>
+                </button>
+                <button class="preset-btn h-auto flex-col items-start p-3 rounded-lg border border-zinc-700 text-left transition-all hover:border-indigo-500" data-preset="custom">
+                  <span class="font-medium">自定义</span>
+                  <span class="text-xs text-zinc-400">手动调整参数</span>
+                </button>
+              </div>
+              <p id="presetHint" class="text-xs text-zinc-500 hidden"></p>
+            </div>
+
+            <hr class="border-zinc-800">
+
+            <!-- 分辨率 -->
+            <div class="space-y-3">
+              <label class="text-sm font-medium">输出分辨率</label>
+              <select id="resolutionSelect" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm">
+                <option value="original">原始分辨率</option>
+                <option value="8k">8K (7680x4320)</option>
+                <option value="4k">4K (3840x2160)</option>
+                <option value="1080p">1080p (1920x1080)</option>
+                <option value="720p" selected>720p (1280x720)</option>
+                <option value="480p">480p (854x480)</option>
+                <option value="360p">360p (640x360)</option>
+              </select>
+            </div>
+
+            <!-- 视频比特率 -->
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium">视频比特率</label>
+                <span id="bitrateValue" class="text-sm font-medium">2500 kbps</span>
+              </div>
+              <input type="range" id="bitrateSlider" min="100" max="20000" step="50" value="2500">
+            </div>
+
+            <!-- 帧率 -->
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium">输出帧率</label>
+                <span id="fpsValue" class="text-sm font-medium">30 FPS</span>
+              </div>
+              <input type="range" id="fpsSlider" min="15" max="60" step="5" value="30">
+            </div>
+
+            <hr class="border-zinc-800">
+
+            <!-- 开始压缩按钮 -->
+            <button id="compressBtn" class="w-full bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-lg font-medium flex items-center justify-center gap-2 text-lg transition-colors" disabled>
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              开始压缩
+            </button>
+
+            <!-- 取消按钮 -->
+            <button id="cancelBtn" class="hidden w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 py-3 rounded-lg font-medium transition-colors">
+              取消压缩
+            </button>
+
+            <!-- 预估信息 -->
+            <div id="estimateSection" class="hidden rounded-lg bg-zinc-800/50 p-3 text-sm">
+              <p class="font-medium">预估输出</p>
+              <div class="mt-2 space-y-1 text-zinc-400">
+                <p>分辨率: <span id="estimateResolution">-</span></p>
+                <p>帧率: <span id="estimateFps">-</span></p>
+                <p>比特率: <span id="estimateBitrate">-</span></p>
+                <p>预估大小: <span id="estimateSize">-</span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ==================== 平台配置 ====================
+    const PLATFORM_CONFIGS = {
+      wechat_moments: {
+        name: '微信朋友圈',
+        maxSize: 10 * 1024 * 1024, // 10MB
+        maxDuration: 30, // 朋友圈实际支持最长30秒
+        recommendedResolution: '1080p',
+        maxResolution: '1080p',
+        aspectRatio: '9:16', // 推荐竖屏
+        maxBitrate: 2000, // 2Mbps以下微信不转码
+        recommendedBitrate: 1600,
+        fps: 30,
+        maxFps: 30,
+        hint: '朋友圈视频最长30秒，建议1080p竖屏(9:16)，码率≤2Mbps可避免微信二次压缩'
+      },
+      wechat_chat: {
+        name: '微信群聊/私聊',
+        maxSize: 100 * 1024 * 1024, // 微信实际支持更大
+        maxDuration: null,
+        recommendedResolution: '720p',
+        maxResolution: '1080p',
+        maxBitrate: 2500, // 2.5Mbps以下微信不转码
+        recommendedBitrate: 1500,
+        fps: 30,
+        maxFps: 30,
+        hint: '群聊视频建议25MB内(便于发送)，码率≤2.5Mbps可避免微信二次压缩'
+      },
+      xiaohongshu: {
+        name: '小红书',
+        maxSize: 500 * 1024 * 1024, // 500MB
+        maxDuration: 15 * 60, // 15分钟
+        recommendedResolution: '1080p',
+        maxResolution: '4k',
+        aspectRatio: '9:16', // 推荐竖屏
+        maxBitrate: 10000,
+        recommendedBitrate: 6000,
+        fps: 30,
+        maxFps: 60,
+        hint: '小红书支持4K/60fps，建议1080p竖屏(9:16)，时长≤15分钟，文件≤500MB'
+      },
+      weibo: {
+        name: '新浪微博',
+        maxSize: 500 * 1024 * 1024, // 500MB
+        maxDuration: 10 * 60, // 10分钟
+        recommendedResolution: '1080p',
+        maxResolution: '1080p',
+        maxBitrate: 8000,
+        recommendedBitrate: 4000,
+        fps: 30,
+        maxFps: 60,
+        hint: '微博建议时长≤10分钟，文件≤500MB，1080p/30fps'
+      },
+      tiktok: {
+        name: '抖音/TikTok',
+        maxSize: 500 * 1024 * 1024, // 500MB
+        maxDuration: 10 * 60, // 10分钟
+        recommendedResolution: '1080p',
+        maxResolution: '4k',
+        aspectRatio: '9:16', // 必须竖屏
+        maxBitrate: 16000,
+        recommendedBitrate: 8000,
+        fps: 30,
+        maxFps: 60,
+        hint: '抖音支持4K/60fps，强烈建议1080p竖屏(9:16)，码率8-16Mbps'
+      },
+      kuaishou: {
+        name: '快手',
+        maxSize: 500 * 1024 * 1024, // 500MB
+        maxDuration: 10 * 60, // 10分钟
+        recommendedResolution: '1080p',
+        maxResolution: '1080p',
+        aspectRatio: '9:16', // 推荐竖屏
+        maxBitrate: 10000,
+        recommendedBitrate: 5000,
+        fps: 30,
+        maxFps: 60,
+        hint: '快手建议1080p竖屏(9:16)，码率5-10Mbps'
+      },
+      bilibili: {
+        name: 'B站',
+        maxSize: 4 * 1024 * 1024 * 1024, // 4GB
+        maxDuration: 240 * 60, // 4小时
+        recommendedResolution: '1080p',
+        maxResolution: '8k',
+        maxBitrate: 20000,
+        recommendedBitrate: 8000,
+        fps: 30,
+        maxFps: 120,
+        hint: 'B站支持8K/120fps，建议1080p/4K，码率8-20Mbps'
+      },
+      youtube: {
+        name: 'YouTube',
+        maxSize: 128 * 1024 * 1024 * 1024, // 128GB
+        maxDuration: 12 * 60 * 60, // 12小时
+        recommendedResolution: '1080p',
+        maxResolution: '8k',
+        maxBitrate: 60000,
+        recommendedBitrate: 12000,
+        fps: 30,
+        maxFps: 60,
+        hint: 'YouTube支持8K/60fps，建议1080p/4K，码率12-45Mbps'
+      },
+      twitter: {
+        name: 'Twitter/X',
+        maxSize: 512 * 1024 * 1024, // 512MB
+        maxDuration: 140, // 2分20秒
+        recommendedResolution: '1080p',
+        maxResolution: '1080p',
+        maxBitrate: 10000,
+        recommendedBitrate: 5000,
+        fps: 30,
+        maxFps: 60,
+        hint: 'Twitter建议时长≤2分20秒，1080p，码率≤10Mbps'
+      },
+      instagram: {
+        name: 'Instagram',
+        maxSize: 100 * 1024 * 1024, // 100MB
+        maxDuration: 60, // 60秒（Feed视频）
+        recommendedResolution: '1080p',
+        maxResolution: '1080p',
+        aspectRatio: '9:16', // 推荐竖屏
+        maxBitrate: 10000,
+        recommendedBitrate: 5000,
+        fps: 30,
+        maxFps: 60,
+        hint: 'Instagram建议1080p竖屏(9:16)，Feed视频最长60秒'
+      },
+      facebook: {
+        name: 'Facebook',
+        maxSize: 10 * 1024 * 1024 * 1024, // 10GB
+        maxDuration: 240 * 60, // 240分钟
+        recommendedResolution: '1080p',
+        maxResolution: '4k',
+        maxBitrate: 25000,
+        recommendedBitrate: 8000,
+        fps: 30,
+        maxFps: 60,
+        hint: 'Facebook支持4K/60fps，建议1080p，码率8-25Mbps'
+      },
+      linkedin: {
+        name: 'LinkedIn',
+        maxSize: 5 * 1024 * 1024 * 1024, // 5GB
+        maxDuration: 10 * 60, // 10分钟
+        recommendedResolution: '1080p',
+        maxResolution: '1080p',
+        maxBitrate: 10000,
+        recommendedBitrate: 5000,
+        fps: 30,
+        maxFps: 60,
+        hint: 'LinkedIn建议时长≤10分钟，1080p/30fps'
+      },
+      discord: {
+        name: 'Discord',
+        maxSize: 25 * 1024 * 1024, // 25MB（免费用户）
+        nitroMaxSize: 500 * 1024 * 1024, // Nitro用户500MB
+        maxDuration: null,
+        recommendedResolution: '720p',
+        maxResolution: '1080p',
+        maxBitrate: 5000,
+        recommendedBitrate: 2000,
+        fps: 30,
+        maxFps: 60,
+        hint: 'Discord免费用户限制25MB，Nitro用户500MB'
+      },
+      whatsapp: {
+        name: 'WhatsApp',
+        maxSize: 100 * 1024 * 1024, // 100MB
+        maxDuration: 180, // 3分钟
+        recommendedResolution: '720p',
+        maxResolution: '1080p',
+        maxBitrate: 4000,
+        recommendedBitrate: 2000,
+        fps: 30,
+        maxFps: 30,
+        hint: 'WhatsApp建议时长≤3分钟，文件≤100MB'
+      },
+      telegram: {
+        name: 'Telegram',
+        maxSize: 2 * 1024 * 1024 * 1024, // 2GB
+        maxDuration: null,
+        recommendedResolution: '1080p',
+        maxResolution: '4k',
+        maxBitrate: null,
+        recommendedBitrate: 5000,
+        fps: 30,
+        maxFps: 60,
+        hint: 'Telegram支持大文件(2GB)，可保持原画质'
+      },
+      email: {
+        name: '邮件附件',
+        maxSize: 20 * 1024 * 1024, // 20MB（通用限制）
+        maxDuration: null,
+        recommendedResolution: '720p',
+        maxResolution: '1080p',
+        maxBitrate: 3000,
+        recommendedBitrate: 1500,
+        fps: 30,
+        maxFps: 30,
+        hint: '邮件附件建议≤20MB（Gmail/Outlook限制）'
+      }
+    };
+
+    // ==================== 全局状态 ====================
+    const state = {
+      videoInfo: null,
+      settings: { quality: 'medium', resolution: '720p', bitrate: 2500, fps: 30, audioBitrate: 128 },
+      result: null,
+      isCompressing: false,
+      abortController: null,
+      currentFrame: null,
+      isPlaying: false,
+      selectedPlatform: null,
+      selectedMaxSize: null
+    };
+
+    // ==================== 质量预设配置 ====================
+    // 注意：这些是相对比例，实际值会根据原始视频属性进行计算且不超过原始值
+    const PRESET_CONFIGS = {
+      low: {
+        name: '高压缩',
+        bitrateMultiplier: 0.3, // 原始码率的30%
+        resolutionScale: 0.5,   // 原始分辨率的50%
+        fpsMultiplier: 1,        // 保持原始帧率（但不超过30）
+        maxBitrate: 1500,        // 最高1500kbps
+        maxResolution: '720p',   // 最高720p
+        maxFps: 30,
+        description: '文件最小，适合快速分享'
+      },
+      medium: {
+        name: '平衡',
+        bitrateMultiplier: 0.5,
+        resolutionScale: 0.75,
+        fpsMultiplier: 1,
+        maxBitrate: 3500,
+        maxResolution: '1080p',
+        maxFps: 30,
+        description: '质量与大小的平衡'
+      },
+      high: {
+        name: '高质量',
+        bitrateMultiplier: 0.8,
+        resolutionScale: 1,
+        fpsMultiplier: 1,
+        maxBitrate: 8000,
+        maxResolution: 'original',
+        maxFps: 60,
+        description: '接近原画质'
+      },
+      custom: null
+    };
+
+    const RESOLUTION_MAP = {
+      original: null,
+      '8k': { width: 7680, height: 4320 },
+      '4k': { width: 3840, height: 2160 },
+      '1080p': { width: 1920, height: 1080 },
+      '720p': { width: 1280, height: 720 },
+      '480p': { width: 854, height: 480 },
+      '360p': { width: 640, height: 360 }
+    };
+
+    // ==================== DOM 元素 ====================
+    const $ = id => document.getElementById(id);
+    const el = {
+      dropZone: $('dropZone'),
+      fileInput: $('fileInput'),
+      uploadSection: $('uploadSection'),
+      videoPreviewSection: $('videoPreviewSection'),
+      previewContainer: $('previewContainer'),
+      previewCanvas: $('previewCanvas'),
+      previewVideo: $('previewVideo'),
+      changeVideoBtn: $('changeVideoBtn'),
+      progressOverlay: $('progressOverlay'),
+      processedArea: $('processedArea'),
+      unprocessedArea: $('unprocessedArea'),
+      progressPercent: $('progressPercent'),
+      compareContainer: $('compareContainer'),
+      originalCompareVideo: $('originalCompareVideo'),
+      compressedCompareVideo: $('compressedCompareVideo'),
+      videoRight: $('videoRight'),
+      compareSlider: $('compareSlider'),
+      playPauseBtn: $('playPauseBtn'),
+      playIcon: $('playIcon'),
+      playPauseText: $('playPauseText'),
+      fileSize: $('fileSize'),
+      duration: $('duration'),
+      resolution: $('resolution'),
+      bitrate: $('bitrate'),
+      resultInfo: $('resultInfo'),
+      sizeComparison: $('sizeComparison'),
+      reductionPercent: $('reductionPercent'),
+      savedSize: $('savedSize'),
+      downloadBtn: $('downloadBtn'),
+      presetBtns: document.querySelectorAll('.preset-btn'),
+      platformBtns: document.querySelectorAll('.platform-btn'),
+      sizeBtns: document.querySelectorAll('.size-btn'),
+      platformHint: $('platformHint'),
+      sizeHint: $('sizeHint'),
+      presetHint: $('presetHint'),
+      resolutionSelect: $('resolutionSelect'),
+      bitrateSlider: $('bitrateSlider'),
+      bitrateValue: $('bitrateValue'),
+      fpsSlider: $('fpsSlider'),
+      fpsValue: $('fpsValue'),
+      compressBtn: $('compressBtn'),
+      cancelBtn: $('cancelBtn'),
+      newVideoBtn: $('newVideoBtn'),
+      estimateSection: $('estimateSection'),
+      estimateResolution: $('estimateResolution'),
+      estimateFps: $('estimateFps'),
+      estimateBitrate: $('estimateBitrate'),
+      estimateSize: $('estimateSize'),
+      gpuInfoBtn: $('gpuInfoBtn'),
+      gpuInfoText: $('gpuInfoText'),
+      gpuModal: $('gpuModal'),
+      gpuModalContent: $('gpuModalContent'),
+      closeGpuModal: $('closeGpuModal'),
+      backgroundNotice: $('backgroundNotice')
+    };
+
+    // ==================== 工具函数 ====================
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    function formatTime(seconds) {
+      if (seconds < 60) return `${Math.round(seconds)}秒`;
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.round(seconds % 60);
+      return `${mins}分${secs}秒`;
+    }
+
+    function checkWebCodecsSupport() {
+      return typeof VideoDecoder !== 'undefined' && typeof VideoEncoder !== 'undefined';
+    }
+
+    // ==================== 智能参数计算 ====================
+
+    // 将分辨率字符串转换为尺寸对象
+    function resolutionToSize(resolution, originalWidth, originalHeight) {
+      if (resolution === 'original' || !resolution) {
+        return { width: originalWidth, height: originalHeight };
+      }
+      // 处理 4k, 8k 等
+      if (resolution === '4k') return { width: 3840, height: 2160 };
+      if (resolution === '8k') return { width: 7680, height: 4320 };
+      return RESOLUTION_MAP[resolution] || { width: originalWidth, height: originalHeight };
+    }
+
+    // 根据宽度选择最接近的标准分辨率
+    function selectResolutionByWidth(width, originalWidth, originalHeight) {
+      const resolutions = [
+        { key: '360p', width: 640 },
+        { key: '480p', width: 854 },
+        { key: '720p', width: 1280 },
+        { key: '1080p', width: 1920 },
+        { key: '4k', width: 3840 },
+        { key: '8k', width: 7680 }
+      ];
+
+      // 找到不超过目标宽度的最大分辨率
+      let selected = '360p';
+      for (const res of resolutions) {
+        if (res.width <= width && res.width <= originalWidth) {
+          selected = res.key;
+        }
+      }
+      return selected;
+    }
+
+    // 计算目标分辨率（确保不超过原始分辨率）
+    function clampResolution(targetRes, originalWidth, originalHeight) {
+      const target = resolutionToSize(targetRes, originalWidth, originalHeight);
+      const targetAspect = target.width / target.height;
+      const originalAspect = originalWidth / originalHeight;
+
+      // 如果目标分辨率大于原始，使用原始
+      if (target.width >= originalWidth && target.height >= originalHeight) {
+        return 'original';
+      }
+
+      return targetRes;
+    }
+
+    // 计算最佳比特率范围
+    function getBitrateRangeForResolution(resolutionKey) {
+      const ranges = {
+        '360p': { min: 100, max: 1000, recommended: 400 },
+        '480p': { min: 100, max: 2000, recommended: 800 },
+        '720p': { min: 100, max: 4000, recommended: 2000 },
+        '1080p': { min: 200, max: 12000, recommended: 5000 },
+        '4k': { min: 1000, max: 40000, recommended: 16000 },
+        '8k': { min: 5000, max: 80000, recommended: 40000 },
+        'original': { min: 200, max: 40000, recommended: 8000 }
+      };
+      return ranges[resolutionKey] || ranges['720p'];
+    }
+
+    // 根据质量预设计算参数（不超过原始视频属性）
+    function calculateParamsByPreset(presetKey, videoInfo) {
+      if (!videoInfo) return null;
+
+      const preset = PRESET_CONFIGS[presetKey];
+      if (!preset || presetKey === 'custom') return null;
+
+      // 原始视频属性
+      const originalBitrate = videoInfo.bitrate || 5000;
+      const originalWidth = videoInfo.width;
+      const originalHeight = videoInfo.height;
+      const originalFps = videoInfo.fps || 30;
+
+      // 计算目标比特率：基于原始的比例，但不超过预设最大值，也不超过原始
+      let targetBitrate = Math.min(
+        originalBitrate * preset.bitrateMultiplier,
+        preset.maxBitrate,
+        originalBitrate
+      );
+
+      // 计算目标分辨率
+      let targetRes;
+      if (preset.maxResolution === 'original') {
+        targetRes = 'original';
+      } else {
+        const maxResSize = resolutionToSize(preset.maxResolution, originalWidth, originalHeight);
+        const scaledWidth = originalWidth * preset.resolutionScale;
+        // 选择不超过 scaledWidth 和 maxResSize 的标准分辨率
+        targetRes = selectResolutionByWidth(
+          Math.min(scaledWidth, maxResSize.width),
+          originalWidth,
+          originalHeight
+        );
+      }
+      targetRes = clampResolution(targetRes, originalWidth, originalHeight);
+
+      // 计算目标帧率：不超过原始，也不超过预设最大值
+      const targetFps = Math.min(
+        Math.round(originalFps * preset.fpsMultiplier),
+        preset.maxFps,
+        originalFps
+      );
+
+      // 根据分辨率调整比特率范围
+      const bitrateRange = getBitrateRangeForResolution(targetRes);
+      targetBitrate = Math.max(bitrateRange.min, Math.min(targetBitrate, bitrateRange.max));
+
+      return {
+        bitrate: Math.round(targetBitrate),
+        resolution: targetRes,
+        fps: Math.max(15, targetFps),
+        fromPreset: presetKey
+      };
+    }
+
+    // 根据目标文件大小计算最佳参数
+    function calculateParamsForTargetSize(targetSizeBytes, videoInfo, platformConfig = null) {
+      if (!videoInfo) return null;
+
+      const duration = videoInfo.duration;
+      const audioBitrate = state.settings.audioBitrate || 128; // kbps
+      const originalWidth = videoInfo.width;
+      const originalHeight = videoInfo.height;
+      const originalBitrate = videoInfo.bitrate || 5000;
+      const originalFps = videoInfo.fps || 30;
+
+      // 从平台配置获取限制
+      let maxBitrate = Infinity;
+      let maxResolution = '8k';
+      let maxFps = 120;
+      let recommendedResolution = null;
+      let recommendedBitrate = null;
+      let recommendedFps = null;
+
+      if (platformConfig) {
+        maxBitrate = platformConfig.maxBitrate || Infinity;
+        maxResolution = platformConfig.maxResolution || '8k';
+        maxFps = platformConfig.maxFps || 120;
+        recommendedResolution = platformConfig.recommendedResolution;
+        recommendedBitrate = platformConfig.recommendedBitrate;
+        recommendedFps = platformConfig.fps || 30;
+      }
+
+      // 计算目标帧率（先确定帧率，因为它会影响比特率计算）
+      let targetFps;
+      if (recommendedFps) {
+        targetFps = Math.min(recommendedFps, originalFps, maxFps);
+      } else {
+        targetFps = Math.min(30, originalFps, maxFps);
+      }
+      targetFps = Math.max(15, targetFps); // 最低15fps
+
+      // 帧率比例因子（相对于30fps）
+      const fpsFactor = targetFps / 30;
+
+      // 计算可用于视频的总比特率，考虑帧率影响
+      // 公式: 总比特率 = (目标大小 × 8 / 时长) / 帧率因子
+      const safetyMargin = 0.93; // 留出 7% 余量
+      const totalBitrate = (targetSizeBytes * 8 * safetyMargin) / duration / 1000 / fpsFactor; // kbps
+      let videoBitrate = Math.max(100, totalBitrate - audioBitrate);
+
+      // 根据比特率选择合适的分辨率（从低到高尝试）
+      let resolution;
+      if (recommendedResolution) {
+        resolution = clampResolution(recommendedResolution, originalWidth, originalHeight);
+      } else {
+        // 根据比特率自动选择（考虑帧率因子后的有效比特率）
+        const effectiveBitrate = videoBitrate * fpsFactor;
+        if (effectiveBitrate >= 15000) {
+          resolution = '4k';
+        } else if (effectiveBitrate >= 6000) {
+          resolution = '1080p';
+        } else if (effectiveBitrate >= 2500) {
+          resolution = '720p';
+        } else if (effectiveBitrate >= 1000) {
+          resolution = '480p';
+        } else {
+          resolution = '360p';
+        }
+        resolution = clampResolution(resolution, originalWidth, originalHeight);
+      }
+
+      // 确保分辨率不超过平台限制
+      resolution = clampResolution(resolution, originalWidth, originalHeight);
+      const maxResSize = resolutionToSize(maxResolution, originalWidth, originalHeight);
+      const currentResSize = resolutionToSize(resolution, originalWidth, originalHeight);
+      if (currentResSize.width > maxResSize.width) {
+        resolution = clampResolution(maxResolution, originalWidth, originalHeight);
+      }
+
+      // 获取该分辨率的合理比特率范围
+      const bitrateRange = getBitrateRangeForResolution(resolution);
+
+      // 如果有推荐比特率，优先使用
+      if (recommendedBitrate) {
+        const recSize = ((recommendedBitrate * fpsFactor + audioBitrate) * duration * 1000) / 8;
+        if (recSize <= targetSizeBytes * 1.1) { // 允许超10%
+          videoBitrate = recommendedBitrate;
+        }
+      }
+
+      // 限制比特率在合理范围内（不乘以fpsFactor，因为fpsFactor已经在前期计算过了）
+      videoBitrate = Math.max(bitrateRange.min, Math.min(videoBitrate, bitrateRange.max, maxBitrate, originalBitrate));
+
+      // 如果即使最小比特率也超出目标大小，尝试降低帧率
+      let currentEstSize = ((videoBitrate * fpsFactor + audioBitrate) * duration * 1000) / 8;
+      if (currentEstSize > targetSizeBytes && targetFps > 15) {
+        // 尝试降低帧率
+        const fpsOptions = [25, 20, 15];
+        for (const testFps of fpsOptions) {
+          if (testFps >= originalFps) continue; // 不能超过原始帧率
+          const testFpsFactor = testFps / 30;
+          const testSize = ((videoBitrate * testFpsFactor + audioBitrate) * duration * 1000) / 8;
+          if (testSize <= targetSizeBytes) {
+            targetFps = testFps;
+            break;
+          }
+        }
+      }
+
+      // 如果还是太大，降低分辨率
+      const finalFpsFactor = targetFps / 30;
+      currentEstSize = ((videoBitrate * finalFpsFactor + audioBitrate) * duration * 1000) / 8;
+      if (currentEstSize > targetSizeBytes) {
+        const resolutions = ['1080p', '720p', '480p', '360p'];
+        for (const lowerRes of resolutions) {
+          const lowerRange = getBitrateRangeForResolution(lowerRes);
+          const testBitrate = lowerRange.recommended;
+          const testSize = ((testBitrate * finalFpsFactor + audioBitrate) * duration * 1000) / 8;
+          if (testSize <= targetSizeBytes) {
+            resolution = clampResolution(lowerRes, originalWidth, originalHeight);
+            videoBitrate = Math.min(testBitrate, maxBitrate, originalBitrate);
+            break;
+          }
+          // 即使是最小也试试
+          const minTestSize = ((lowerRange.min * finalFpsFactor + audioBitrate) * duration * 1000) / 8;
+          if (minTestSize <= targetSizeBytes) {
+            resolution = clampResolution(lowerRes, originalWidth, originalHeight);
+            videoBitrate = Math.max(lowerRange.min, Math.min(maxBitrate, originalBitrate));
+            break;
+          }
+        }
+      }
+
+      // 最终估算大小（考虑帧率）
+      const estimatedSize = ((videoBitrate * finalFpsFactor + audioBitrate) * duration * 1000) / 8;
+      const canFit = estimatedSize <= targetSizeBytes * 1.05; // 允许5%误差
+
+      return {
+        bitrate: Math.round(videoBitrate),
+        resolution,
+        fps: targetFps,
+        estimatedSize,
+        canFit
+      };
+    }
+
+    // 统一的参数计算入口
+    function calculateOptimalParams(targetSizeBytes, videoInfo, platformConfig = null) {
+      return calculateParamsForTargetSize(targetSizeBytes, videoInfo, platformConfig);
+    }
+
+    // 应用平台配置
+    function applyPlatformConfig(platformKey) {
+      const config = PLATFORM_CONFIGS[platformKey];
+      if (!config || !state.videoInfo) return;
+
+      state.selectedPlatform = platformKey;
+      state.selectedMaxSize = null; // 清除大小限制选择
+
+      // 使用平台配置的目标大小计算最佳参数
+      const params = calculateParamsForTargetSize(config.maxSize, state.videoInfo, config);
+
+      if (params) {
+        state.settings.bitrate = params.bitrate;
+        state.settings.resolution = params.resolution;
+        state.settings.fps = params.fps;
+        state.settings.quality = 'custom';
+      }
+
+      // 更新UI
+      updateSettings();
+
+      // 显示提示
+      el.platformHint.textContent = config.hint;
+      el.platformHint.classList.remove('hidden');
+      el.sizeHint.classList.add('hidden');
+
+      // 更新按钮状态
+      el.platformBtns.forEach(btn => {
+        btn.classList.toggle('border-indigo-500', btn.dataset.platform === platformKey);
+        btn.classList.toggle('bg-indigo-500/10', btn.dataset.platform === platformKey);
+        btn.classList.toggle('border-zinc-700', btn.dataset.platform !== platformKey);
+      });
+      el.sizeBtns.forEach(btn => {
+        btn.classList.remove('border-green-500', 'bg-green-500/10');
+        btn.classList.add('border-zinc-700');
+      });
+    }
+
+    // 应用大小限制
+    function applySizeLimit(maxSizeMB) {
+      if (!state.videoInfo) return;
+
+      state.selectedMaxSize = maxSizeMB;
+      state.selectedPlatform = null; // 清除平台选择
+
+      const targetSizeBytes = maxSizeMB * 1024 * 1024;
+      const params = calculateParamsForTargetSize(targetSizeBytes, state.videoInfo);
+
+      if (params) {
+        state.settings.bitrate = params.bitrate;
+        state.settings.resolution = params.resolution;
+        state.settings.fps = params.fps;
+        state.settings.quality = 'custom';
+      }
+
+      // 更新UI
+      updateSettings();
+
+      // 显示提示
+      const estimatedMB = ((state.settings.bitrate + (state.settings.audioBitrate || 128)) * state.videoInfo.duration) / 8 / 1024;
+      el.sizeHint.textContent = `预估输出大小: ~${estimatedMB.toFixed(1)}MB (目标≤${maxSizeMB}MB)`;
+      el.sizeHint.classList.remove('hidden');
+      el.platformHint.classList.add('hidden');
+
+      // 更新按钮状态
+      el.sizeBtns.forEach(btn => {
+        const isSelected = parseInt(btn.dataset.maxsize) === maxSizeMB;
+        btn.classList.toggle('border-green-500', isSelected);
+        btn.classList.toggle('bg-green-500/10', isSelected);
+        btn.classList.toggle('border-zinc-700', !isSelected);
+      });
+      el.platformBtns.forEach(btn => {
+        btn.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+        btn.classList.add('border-zinc-700');
+      });
+    }
+
+    // ==================== GPU 检测 ====================
+    let gpuInfo = { detected: false, adapters: [], hasNvidia: false, webglInfo: null, webgl2Info: null };
+
+    // 从 WebGL 获取 GPU 信息 - 兼容性最好
+    function getWebGLGPUInfo(contextType = 'webgl', canvasAttribs = {}) {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext(contextType, canvasAttribs) || canvas.getContext('experimental-webgl', canvasAttribs);
+        if (!gl) return null;
+
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (!debugInfo) return null;
+
+        return {
+          vendor: gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || 'Unknown',
+          renderer: gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || 'Unknown',
+          contextType: contextType,
+          attribs: canvasAttribs
+        };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function detectGPU() {
+      gpuInfo.adapters = [];
+      gpuInfo.detected = false;
+      gpuInfo.hasNvidia = false;
+
+      // 尝试多种 WebGL 配置来触发不同的 GPU
+      const webglConfigs = [
+        { type: 'webgl', attribs: {} },
+        { type: 'webgl', attribs: { powerPreference: 'high-performance' } },
+        { type: 'webgl', attribs: { powerPreference: 'low-power' } },
+        { type: 'webgl2', attribs: {} },
+        { type: 'webgl2', attribs: { powerPreference: 'high-performance' } },
+        { type: 'webgl2', attribs: { powerPreference: 'low-power' } },
+      ];
+
+      const seen = new Set();
+
+      for (const config of webglConfigs) {
+        const info = getWebGLGPUInfo(config.type, config.attribs);
+        if (!info) continue;
+
+        const key = `${info.vendor}|${info.renderer}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const descLower = (info.vendor + ' ' + info.renderer).toLowerCase();
+        const gpuData = {
+          vendor: info.vendor,
+          device: info.renderer,
+          description: info.renderer,
+          source: config.type,
+          powerPreference: config.attribs.powerPreference,
+          type: 'unknown',
+          icon: '⚪',
+          color: 'text-zinc-400'
+        };
+
+        if (descLower.includes('nvidia') || descLower.includes('geforce') || descLower.includes('rtx') || descLower.includes('gtx')) {
+          gpuInfo.hasNvidia = true;
+          gpuData.type = 'nvidia';
+          gpuData.icon = '🟢';
+          gpuData.color = 'text-green-500';
+        } else if (descLower.includes('intel')) {
+          gpuData.type = 'intel';
+          gpuData.icon = '🔵';
+          gpuData.color = 'text-blue-500';
+        } else if (descLower.includes('amd') || descLower.includes('radeon') || descLower.includes('arc')) {
+          gpuData.type = 'amd';
+          gpuData.icon = '🔴';
+          gpuData.color = 'text-red-500';
+        }
+
+        gpuInfo.adapters.push(gpuData);
+        gpuInfo.detected = true;
+      }
+
+      // 更新显示文本
+      if (gpuInfo.adapters.length > 0) {
+        const primary = gpuInfo.adapters[0];
+        if (gpuInfo.hasNvidia) {
+          el.gpuInfoText.textContent = `🟢 ${gpuInfo.adapters.length} 个 GPU`;
+          el.gpuInfoBtn.classList.add('border-green-500/50', 'bg-green-500/10', 'text-green-400');
+        } else {
+          el.gpuInfoText.textContent = `${primary.icon} ${gpuInfo.adapters.length} 个 GPU`;
+          el.gpuInfoBtn.classList.add(primary.color);
+        }
+      } else {
+        el.gpuInfoText.textContent = 'GPU 检测不可用';
+      }
+
+      return gpuInfo;
+    }
+
+    function showGPUDetails() {
+      let content = '';
+
+      if (!gpuInfo.detected) {
+        content = '<div class="p-4 rounded-lg bg-zinc-800"><p class="text-zinc-400">未能检测到 GPU 信息</p></div>';
+      } else {
+        gpuInfo.adapters.forEach((adapter, index) => {
+          const sourceLabel = adapter.source === 'webgl' ? 'WebGL' : 'WebGL2';
+          const powerLabel = adapter.powerPreference ? ` (${adapter.powerPreference})` : '';
+          content += `
+            <div class="p-4 rounded-lg bg-zinc-800 border border-zinc-700">
+              <div class="flex items-center gap-3 mb-3">
+                <span class="text-2xl">${adapter.icon}</span>
+                <div class="flex-1">
+                  <p class="font-semibold ${adapter.color}">${adapter.vendor}</p>
+                  <p class="text-sm text-zinc-400">${adapter.device}</p>
+                  <p class="text-xs text-zinc-500 mt-1">${sourceLabel}${powerLabel}</p>
+                </div>
+                <span class="text-xs text-zinc-500">#${index + 1}</span>
+              </div>
+            </div>
+          `;
+        });
+
+        content += `
+          <div class="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+            <p class="font-medium text-yellow-400 mb-2">⚠️ 浏览器限制说明</p>
+            <p class="text-sm text-zinc-400 mb-2">
+              出于隐私和安全原因，浏览器<strong>无法直接枚举所有显卡</strong>。
+              这里显示的是浏览器愿意暴露的 GPU。
+            </p>
+            <p class="text-sm text-zinc-400">
+              如果您有 2 个显卡但只显示 1 个，可以在系统设置中切换浏览器使用的 GPU，然后刷新页面重试。
+            </p>
+          </div>
+
+          <div class="p-4 rounded-lg bg-indigo-500/10 border border-indigo-500/30">
+            <p class="font-medium text-indigo-400 mb-2">📖 如何切换浏览器使用的 GPU</p>
+            <div class="text-sm text-zinc-400 space-y-2">
+              <p><strong>Windows 设置：</strong>设置 → 系统 → 显示 → 图形 → 添加浏览器 → 选择"高性能"</p>
+              <p><strong>NVIDIA 控制面板：</strong>管理 3D 设置 → 程序设置 → 选择"高性能 NVIDIA 处理器"</p>
+              <p><strong>AMD 软件：</strong>性能 → 图形配置文件 → 添加浏览器 → 选择"高性能"</p>
+            </div>
+          </div>
+        `;
+      }
+
+      el.gpuModalContent.innerHTML = content;
+      el.gpuModal.classList.remove('hidden');
+      el.gpuModal.classList.add('flex');
+    }
+
+    // ==================== 视频处理 ====================
+    // 检测非黑帧
+    async function findFirstValidFrame(video, canvas, ctx) {
+      const duration = video.duration;
+      const checkInterval = 0.5; // 每0.5秒检查一次
+      let currentTime = 0;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      while (currentTime < Math.min(duration, 10)) { // 最多检查前10秒
+        video.currentTime = currentTime;
+        await new Promise(resolve => { video.onseeked = resolve; });
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+
+        // 检查是否为非黑帧
+        let nonBlackPixels = 0;
+        const sampleStep = 100; // 采样步长
+        const threshold = 15; // 亮度阈值
+
+        for (let i = 0; i < data.length; i += 4 * sampleStep) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const brightness = (r + g + b) / 3;
+
+          if (brightness > threshold) {
+            nonBlackPixels++;
+          }
+        }
+
+        // 如果非黑像素超过5%，认为是有效帧
+        if (nonBlackPixels > (data.length / (4 * sampleStep)) * 0.05) {
+          return currentTime;
+        }
+
+        currentTime += checkInterval;
+      }
+
+      return 0; // 如果没找到，返回开头
+    }
+
+    // 显示预览帧
+    function displayPreviewFrame(video, canvas, ctx, time) {
+      return new Promise(resolve => {
+        video.currentTime = time;
+        video.onseeked = () => {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          resolve();
+        };
+      });
+    }
+
+    // 解析视频信息
+    async function parseVideoInfo(file) {
+      return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.src = URL.createObjectURL(file);
+
+        video.onloadedmetadata = async () => {
+          // 估算原始比特率
+          const estimatedBitrate = (file.size * 8) / video.duration / 1000;
+
+          const info = {
+            file,
+            duration: video.duration,
+            width: video.videoWidth,
+            height: video.videoHeight,
+            bitrate: estimatedBitrate,
+            fps: 30, // 默认值，后面尝试通过其他方式获取
+            url: video.src
+          };
+
+          // 查找第一个有效帧
+          const canvas = el.previewCanvas;
+          const ctx = canvas.getContext('2d');
+          el.previewVideo.src = video.src;
+          await new Promise(r => { el.previewVideo.onloadeddata = r; });
+
+          const validTime = await findFirstValidFrame(el.previewVideo, canvas, ctx);
+          await displayPreviewFrame(el.previewVideo, canvas, ctx, validTime);
+
+          resolve(info);
+        };
+
+        video.onerror = () => reject(new Error('无法加载视频'));
+      });
+    }
+
+    // ==================== UI 更新 ====================
+    function updateUI() {
+      const { videoInfo, settings, result, isCompressing } = state;
+
+      el.uploadSection.classList.toggle('hidden', !!videoInfo);
+      el.videoPreviewSection.classList.toggle('hidden', !videoInfo);
+      el.compressBtn.disabled = !videoInfo || isCompressing;
+      el.cancelBtn.classList.toggle('hidden', !isCompressing);
+      el.estimateSection.classList.toggle('hidden', !videoInfo);
+      el.progressOverlay.classList.toggle('hidden', !isCompressing);
+      el.changeVideoBtn.classList.toggle('hidden', isCompressing);
+
+      if (isCompressing) {
+        el.compressBtn.innerHTML = '<svg class="h-5 w-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 压缩中...';
+      } else {
+        el.compressBtn.innerHTML = '<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> 开始压缩';
+      }
+
+      if (videoInfo) {
+        el.fileSize.textContent = formatFileSize(videoInfo.file.size);
+        el.duration.textContent = formatTime(videoInfo.duration);
+        el.resolution.textContent = `${videoInfo.width}x${videoInfo.height}`;
+        el.bitrate.textContent = `${Math.round(videoInfo.bitrate)} kbps`;
+
+        // 计算目标分辨率
+        let targetRes = RESOLUTION_MAP[settings.resolution];
+        let tw, th;
+        if (settings.resolution === 'original' || !targetRes) {
+          tw = videoInfo.width;
+          th = videoInfo.height;
+        } else {
+          // 保持宽高比缩放
+          const originalAspect = videoInfo.width / videoInfo.height;
+          const targetAspect = targetRes.width / targetRes.height;
+          if (originalAspect > targetAspect) {
+            // 原始更宽，以宽度为基准
+            tw = Math.min(targetRes.width, videoInfo.width);
+            th = Math.round(tw / originalAspect);
+          } else {
+            // 原始更高，以高度为基准
+            th = Math.min(targetRes.height, videoInfo.height);
+            tw = Math.round(th * originalAspect);
+          }
+          // 如果目标分辨率大于原始，使用原始
+          if (targetRes.width >= videoInfo.width && targetRes.height >= videoInfo.height) {
+            tw = videoInfo.width;
+            th = videoInfo.height;
+          }
+        }
+        el.estimateResolution.textContent = `${tw}x${th}`;
+
+        // 计算目标帧率（不超过原始）
+        const originalFps = videoInfo.fps || 30;
+        const targetFps = Math.min(settings.fps, originalFps);
+        el.estimateFps.textContent = `${targetFps} FPS`;
+
+        // 显示目标比特率
+        el.estimateBitrate.textContent = `${settings.bitrate} kbps`;
+
+        // 更准确的预估文件大小计算 - 考虑帧率影响
+        // 公式: 预估大小 = (视频比特率 + 音频比特率) × 时长 / 8 × (目标帧率/参考帧率)
+        // 参考帧率设为30fps作为基准
+        const audioBitrate = state.settings.audioBitrate || 128;
+        const fpsFactor = targetFps / 30; // 帧率比例因子
+        const estimatedBits = (settings.bitrate + audioBitrate) * videoInfo.duration * 1000 * fpsFactor;
+        const estimatedBytes = estimatedBits / 8;
+        el.estimateSize.textContent = formatFileSize(estimatedBytes);
+      }
+
+      if (result) {
+        el.resultInfo.classList.remove('hidden');
+        el.sizeComparison.textContent = `${formatFileSize(result.originalSize)} → ${formatFileSize(result.compressedSize)}`;
+        el.reductionPercent.textContent = `-${result.reduction.toFixed(1)}%`;
+        el.savedSize.textContent = `节省 ${formatFileSize(result.originalSize - result.compressedSize)}`;
+
+        // 显示对比区域
+        showCompareView();
+      }
+    }
+
+    function updateSettings() {
+      const { settings } = state;
+
+      el.bitrateValue.textContent = `${settings.bitrate} kbps`;
+      el.fpsValue.textContent = `${settings.fps} FPS`;
+      el.bitrateSlider.value = settings.bitrate;
+      el.fpsSlider.value = settings.fps;
+      el.resolutionSelect.value = settings.resolution;
+
+      el.presetBtns.forEach(btn => {
+        const preset = btn.dataset.preset;
+        const isActive = settings.quality === preset;
+        btn.classList.toggle('border-indigo-500', isActive);
+        btn.classList.toggle('bg-indigo-500/10', isActive);
+        btn.classList.toggle('border-zinc-700', !isActive);
+      });
+
+      const isCustom = settings.quality === 'custom';
+      el.resolutionSelect.disabled = !isCustom;
+      el.bitrateSlider.disabled = !isCustom;
+      el.fpsSlider.disabled = !isCustom;
+
+      updateUI();
+    }
+
+    // 更新进度显示
+    function updateProgress(percent, frameCanvas) {
+      el.progressPercent.textContent = `${Math.round(percent)}%`;
+
+      // 更新蒙版
+      const processedWidth = percent;
+      el.processedArea.style.width = `${processedWidth}%`;
+      el.unprocessedArea.style.left = `${processedWidth}%`;
+      el.unprocessedArea.style.width = `${100 - processedWidth}%`;
+
+      // 更新当前帧预览
+      if (frameCanvas) {
+        const ctx = el.previewCanvas.getContext('2d');
+        ctx.drawImage(frameCanvas, 0, 0, el.previewCanvas.width, el.previewCanvas.height);
+      }
+    }
+
+    // 显示对比视图
+    function showCompareView() {
+      el.previewContainer.classList.add('hidden');
+      el.compareContainer.classList.remove('hidden');
+
+      el.originalCompareVideo.src = state.videoInfo.url;
+      el.compressedCompareVideo.src = state.result.url;
+
+      initCompareSlider();
+    }
+
+    // 初始化对比滑块
+    function initCompareSlider() {
+      const slider = el.compareSlider;
+      const container = el.compareContainer;
+      const videoRight = el.videoRight;
+      let isDragging = false;
+
+      const updatePosition = (x) => {
+        const rect = container.getBoundingClientRect();
+        let percent = ((x - rect.left) / rect.width) * 100;
+        percent = Math.max(0, Math.min(100, percent));
+
+        slider.style.left = `${percent}%`;
+        videoRight.style.clipPath = `inset(0 0 0 ${percent}%)`;
+      };
+
+      slider.addEventListener('mousedown', () => isDragging = true);
+      document.addEventListener('mouseup', () => isDragging = false);
+      document.addEventListener('mousemove', (e) => {
+        if (isDragging) updatePosition(e.clientX);
+      });
+
+      container.addEventListener('touchstart', (e) => {
+        isDragging = true;
+        updatePosition(e.touches[0].clientX);
+      });
+      container.addEventListener('touchmove', (e) => {
+        if (isDragging) updatePosition(e.touches[0].clientX);
+      });
+      container.addEventListener('touchend', () => isDragging = false);
+
+      // 点击也可以移动
+      container.addEventListener('click', (e) => {
+        if (e.target !== slider) updatePosition(e.clientX);
+      });
+    }
+
+    // 播放/暂停控制
+    function togglePlayPause() {
+      const original = el.originalCompareVideo;
+      const compressed = el.compressedCompareVideo;
+
+      if (state.isPlaying) {
+        original.pause();
+        compressed.pause();
+        state.isPlaying = false;
+        el.playPauseText.textContent = '播放对比';
+        el.playIcon.innerHTML = '<path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>';
+      } else {
+        // 同步开始时间
+        compressed.currentTime = original.currentTime;
+
+        // 同时播放
+        Promise.all([
+          original.play(),
+          compressed.play()
+        ]).then(() => {
+          state.isPlaying = true;
+          el.playPauseText.textContent = '暂停';
+          el.playIcon.innerHTML = '<path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>';
+        }).catch(e => console.log('播放错误:', e));
+      }
+    }
+
+    // 同步视频播放 - 使用 requestAnimationFrame 实现更精确的同步
+    let syncAnimationId = null;
+    let lastSyncTime = 0;
+
+    function syncVideos() {
+      const original = el.originalCompareVideo;
+      const compressed = el.compressedCompareVideo;
+
+      // 同步函数
+      const doSync = (timestamp) => {
+        if (!state.isPlaying) {
+          syncAnimationId = null;
+          return;
+        }
+
+        // 每 50ms 同步一次，避免过于频繁
+        if (timestamp - lastSyncTime > 50) {
+          const originalTime = original.currentTime;
+          const compressedTime = compressed.currentTime;
+          const diff = Math.abs(originalTime - compressedTime);
+
+          // 如果时间差超过 0.1 秒，进行同步
+          if (diff > 0.1) {
+            compressed.currentTime = originalTime;
+          }
+
+          lastSyncTime = timestamp;
+        }
+
+        syncAnimationId = requestAnimationFrame(doSync);
+      };
+
+      // 监听播放状态
+      original.addEventListener('play', () => {
+        if (!syncAnimationId) {
+          lastSyncTime = 0;
+          syncAnimationId = requestAnimationFrame(doSync);
+        }
+      });
+
+      original.addEventListener('pause', () => {
+        if (syncAnimationId) {
+          cancelAnimationFrame(syncAnimationId);
+          syncAnimationId = null;
+        }
+        compressed.pause();
+      });
+
+      // 视频结束时暂停
+      original.addEventListener('ended', () => {
+        state.isPlaying = false;
+        el.playPauseText.textContent = '播放对比';
+        el.playIcon.innerHTML = '<path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>';
+      });
+
+      compressed.addEventListener('ended', () => {
+        original.pause();
+        state.isPlaying = false;
+        el.playPauseText.textContent = '播放对比';
+        el.playIcon.innerHTML = '<path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linecap="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>';
+      });
+    }
+
+    // ==================== 压缩核心 ====================
+    // 计算最终输出尺寸（保持宽高比，不超过原始）
+    function calculateOutputDimensions(videoInfo, settings) {
+      const originalWidth = videoInfo.width;
+      const originalHeight = videoInfo.height;
+      const targetRes = RESOLUTION_MAP[settings.resolution];
+
+      if (settings.resolution === 'original' || !targetRes) {
+        return { width: originalWidth, height: originalHeight };
+      }
+
+      const originalAspect = originalWidth / originalHeight;
+      const targetAspect = targetRes.width / targetRes.height;
+
+      let outputWidth, outputHeight;
+
+      if (originalAspect > targetAspect) {
+        // 原始更宽，以目标宽度为基准
+        outputWidth = Math.min(targetRes.width, originalWidth);
+        outputHeight = Math.round(outputWidth / originalAspect);
+      } else {
+        // 原始更高，以目标高度为基准
+        outputHeight = Math.min(targetRes.height, originalHeight);
+        outputWidth = Math.round(outputHeight * originalAspect);
+      }
+
+      // 确保偶数（编码器要求）
+      outputWidth = Math.max(2, outputWidth - (outputWidth % 2));
+      outputHeight = Math.max(2, outputHeight - (outputHeight % 2));
+
+      return { width: outputWidth, height: outputHeight };
+    }
+
+    // 计算输出帧率（不超过原始）
+    function calculateOutputFps(videoInfo, settings) {
+      const originalFps = videoInfo.fps || 30;
+      return Math.min(settings.fps, originalFps);
+    }
+
+    // 计算输出比特率（不超过原始）
+    function calculateOutputBitrate(videoInfo, settings) {
+      const originalBitrate = videoInfo.bitrate || 5000;
+      return Math.min(settings.bitrate, originalBitrate);
+    }
+
+    async function compressVideo() {
+      if (!state.videoInfo) return;
+
+      state.isCompressing = true;
+      state.abortController = new AbortController();
+      updateUI();
+
+      const startTime = Date.now();
+      const { videoInfo, settings } = state;
+
+      try {
+        // 计算最终输出参数（确保不超过原始）
+        const outputDims = calculateOutputDimensions(videoInfo, settings);
+        const outputFps = calculateOutputFps(videoInfo, settings);
+        const outputBitrate = calculateOutputBitrate(videoInfo, settings);
+
+        // 将计算后的参数存入临时对象供压缩函数使用
+        state.compressionParams = {
+          width: outputDims.width,
+          height: outputDims.height,
+          fps: outputFps,
+          bitrate: outputBitrate
+        };
+
+        if (checkWebCodecsSupport()) {
+          await compressWithWebCodecs(outputDims.width, outputDims.height, startTime);
+        } else {
+          await compressWithMediaRecorder(outputDims.width, outputDims.height, startTime);
+        }
+      } catch (error) {
+        if (error.message !== '压缩已取消') {
+          console.error('压缩失败:', error);
+          alert('视频压缩失败: ' + error.message);
+        }
+      } finally {
+        state.isCompressing = false;
+        state.compressionParams = null;
+        updateUI();
+      }
+    }
+
+    async function compressWithWebCodecs(targetWidth, targetHeight, startTime) {
+      const { videoInfo, settings, abortController, compressionParams } = state;
+
+      // 使用计算后的参数（确保不超过原始）
+      const fps = compressionParams?.fps || calculateOutputFps(videoInfo, settings);
+      const bitrate = compressionParams?.bitrate || calculateOutputBitrate(videoInfo, settings);
+
+      const MuxerClass = window.Mp4Muxer?.Muxer;
+      const ArrayBufferTargetClass = window.Mp4Muxer?.ArrayBufferTarget;
+
+      if (!MuxerClass || !ArrayBufferTargetClass) {
+        return await compressWithMediaRecorder(targetWidth, targetHeight, startTime);
+      }
+
+      let muxer, target;
+      try {
+        target = new ArrayBufferTargetClass();
+        muxer = new MuxerClass({
+          target,
+          video: { codec: 'avc', width: targetWidth, height: targetHeight },
+          audio: { codec: 'aac', sampleRate: 48000, numberOfChannels: 2 },
+          fastStart: true,
+        });
+      } catch (e) {
+        return await compressWithMediaRecorder(targetWidth, targetHeight, startTime);
+      }
+
+      let encodedFrames = 0;
+      const totalFrames = Math.ceil(videoInfo.duration * fps);
+
+      const codecCandidates = ['avc1.42001E', 'avc1.4D401E', 'avc1.64001E'];
+      let supportedCodec = null;
+
+      for (const codec of codecCandidates) {
+        const support = await VideoEncoder.isConfigSupported({
+          codec, width: targetWidth, height: targetHeight,
+          bitrate: bitrate * 1000, framerate: fps,
+        });
+        if (support.supported) { supportedCodec = codec; break; }
+      }
+
+      if (!supportedCodec) throw new Error('浏览器不支持视频编码器');
+
+      const videoEncoder = new VideoEncoder({
+        output: (chunk, meta) => {
+          muxer.addVideoChunk(chunk, meta);
+          encodedFrames++;
+          const progress = (encodedFrames / totalFrames) * 100;
+          updateProgress(progress, null);
+        },
+        error: (e) => console.error('编码错误:', e)
+      });
+
+      videoEncoder.configure({
+        codec: supportedCodec,
+        width: targetWidth, height: targetHeight,
+        bitrate: bitrate * 1000,
+        framerate: fps,
+        hardwareAcceleration: 'prefer-hardware',
+      });
+
+      const video = document.createElement('video');
+      video.src = videoInfo.url;
+      video.muted = true;
+      await new Promise(r => { video.onloadeddata = r; });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+
+      // 预览画布
+      const previewCtx = el.previewCanvas.getContext('2d');
+
+      const frameInterval = 1 / fps;
+      let currentTime = 0;
+
+      while (currentTime < videoInfo.duration) {
+        if (abortController.signal.aborted) {
+          videoEncoder.close();
+          throw new Error('压缩已取消');
+        }
+
+        video.currentTime = currentTime;
+        await new Promise(r => { video.onseeked = r; });
+
+        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+        // 更新预览
+        previewCtx.drawImage(canvas, 0, 0, el.previewCanvas.width, el.previewCanvas.height);
+
+        const frame = new VideoFrame(canvas, {
+          timestamp: currentTime * 1000000,
+          duration: frameInterval * 1000000,
+        });
+
+        videoEncoder.encode(frame);
+        frame.close();
+
+        currentTime += frameInterval;
+      }
+
+      await videoEncoder.flush();
+      videoEncoder.close();
+
+      muxer.finalize();
+      const buffer = target.buffer;
+      const blob = new Blob([buffer], { type: 'video/mp4' });
+
+      finishCompression(blob);
+    }
+
+    async function compressWithMediaRecorder(targetWidth, targetHeight, startTime) {
+      const { videoInfo, settings, abortController, compressionParams } = state;
+
+      // 使用计算后的参数（确保不超过原始）
+      const fps = compressionParams?.fps || calculateOutputFps(videoInfo, settings);
+      const bitrate = compressionParams?.bitrate || calculateOutputBitrate(videoInfo, settings);
+
+      const video = document.createElement('video');
+      video.src = videoInfo.url;
+      video.muted = true;
+      await new Promise(r => { video.onloadeddata = r; });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
+
+      const previewCtx = el.previewCanvas.getContext('2d');
+
+      const stream = canvas.captureStream(fps);
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: bitrate * 1000,
+      });
+
+      const chunks = [];
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+      const recordingPromise = new Promise(r => { mediaRecorder.onstop = r; });
+
+      mediaRecorder.start();
+      video.play();
+
+      // 使用 setTimeout 替代 requestAnimationFrame，确保后台也能工作
+      const drawFrame = () => {
+        if (video.ended || video.paused || abortController.signal.aborted) {
+          mediaRecorder.stop();
+          return;
+        }
+
+        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+        previewCtx.drawImage(canvas, 0, 0, el.previewCanvas.width, el.previewCanvas.height);
+
+        const progress = (video.currentTime / videoInfo.duration) * 100;
+        updateProgress(progress, canvas);
+
+        // 使用 setTimeout(0) 替代 requestAnimationFrame
+        // 在后台标签页中，setTimeout 会被节流到最小 1 秒，但不会完全停止
+        setTimeout(drawFrame, 0);
+      };
+
+      drawFrame();
+      video.onended = () => mediaRecorder.stop();
+
+      await recordingPromise;
+
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      finishCompression(blob);
+    }
+
+    function finishCompression(blob) {
+      const url = URL.createObjectURL(blob);
+      const compressedSize = blob.size;
+      const reduction = ((state.videoInfo.file.size - compressedSize) / state.videoInfo.file.size) * 100;
+
+      state.result = {
+        blob,
+        originalSize: state.videoInfo.file.size,
+        compressedSize,
+        reduction,
+        url
+      };
+
+      updateUI();
+    }
+
+    // ==================== 事件处理 ====================
+    async function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (file) await loadVideo(file);
+    }
+
+    async function loadVideo(file) {
+      try {
+        state.videoInfo = await parseVideoInfo(file);
+        state.result = null;
+        state.isPlaying = false;
+
+        // 重置对比视图
+        el.compareContainer.classList.add('hidden');
+        el.previewContainer.classList.remove('hidden');
+        el.resultInfo.classList.add('hidden');
+
+        updateUI();
+      } catch (error) {
+        alert('无法解析视频文件: ' + error.message);
+      }
+    }
+
+    function reset() {
+      state.videoInfo = null;
+      state.result = null;
+      state.isCompressing = false;
+      state.isPlaying = false;
+      el.fileInput.value = '';
+      el.compareContainer.classList.add('hidden');
+      el.previewContainer.classList.remove('hidden');
+      el.resultInfo.classList.add('hidden');
+      updateUI();
+    }
+
+    function downloadResult() {
+      if (!state.result) return;
+      const a = document.createElement('a');
+      a.href = state.result.url;
+      a.download = `compressed_${state.videoInfo.file.name.replace(/\.[^/.]+$/, '')}.mp4`;
+      a.click();
+    }
+
+    // ==================== 初始化 ====================
+    function init() {
+      // 文件上传
+      el.dropZone.addEventListener('click', () => el.fileInput.click());
+      el.fileInput.addEventListener('change', handleFileSelect);
+
+      el.dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        el.dropZone.classList.add('drag-over');
+      });
+      el.dropZone.addEventListener('dragleave', () => el.dropZone.classList.remove('drag-over'));
+      el.dropZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        el.dropZone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file?.type.startsWith('video/')) await loadVideo(file);
+      });
+
+      // 更换视频
+      el.changeVideoBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        el.fileInput.click();
+      });
+      el.previewContainer.addEventListener('click', () => {
+        if (!state.isCompressing && !state.result) el.fileInput.click();
+      });
+
+      // 平台快捷按钮
+      el.platformBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          applyPlatformConfig(btn.dataset.platform);
+        });
+      });
+
+      // 大小限制按钮
+      el.sizeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          applySizeLimit(parseInt(btn.dataset.maxsize));
+        });
+      });
+
+      // 预设按钮
+      el.presetBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const preset = btn.dataset.preset;
+          state.settings.quality = preset;
+
+          // 如果有视频信息，基于原始视频属性计算参数
+          if (preset !== 'custom' && state.videoInfo) {
+            const params = calculateParamsByPreset(preset, state.videoInfo);
+            if (params) {
+              state.settings.bitrate = params.bitrate;
+              state.settings.resolution = params.resolution;
+              state.settings.fps = params.fps;
+            }
+          }
+          // 如果没有视频信息，使用默认值
+          else if (preset !== 'custom') {
+            const defaults = {
+              low: { bitrate: 1000, resolution: '480p', fps: 30 },
+              medium: { bitrate: 2500, resolution: '720p', fps: 30 },
+              high: { bitrate: 5000, resolution: '1080p', fps: 30 }
+            };
+            if (defaults[preset]) {
+              Object.assign(state.settings, defaults[preset]);
+            }
+          }
+
+          // 清除平台和大小选择
+          state.selectedPlatform = null;
+          state.selectedMaxSize = null;
+          el.platformHint.classList.add('hidden');
+          el.sizeHint.classList.add('hidden');
+          el.platformBtns.forEach(b => {
+            b.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+            b.classList.add('border-zinc-700');
+          });
+          el.sizeBtns.forEach(b => {
+            b.classList.remove('border-green-500', 'bg-green-500/10');
+            b.classList.add('border-zinc-700');
+          });
+          updateSettings();
+        });
+      });
+
+      // 滑块
+      el.bitrateSlider.addEventListener('input', (e) => {
+        state.settings.quality = 'custom';
+        state.settings.bitrate = parseInt(e.target.value);
+        updateSettings();
+      });
+      el.fpsSlider.addEventListener('input', (e) => {
+        state.settings.quality = 'custom';
+        state.settings.fps = parseInt(e.target.value);
+        updateSettings();
+      });
+      el.resolutionSelect.addEventListener('change', (e) => {
+        state.settings.quality = 'custom';
+        state.settings.resolution = e.target.value;
+        updateSettings();
+      });
+
+      // 按钮
+      el.compressBtn.addEventListener('click', compressVideo);
+      el.cancelBtn.addEventListener('click', () => {
+        state.abortController?.abort();
+        state.isCompressing = false;
+        updateUI();
+      });
+      el.downloadBtn.addEventListener('click', downloadResult);
+      el.newVideoBtn.addEventListener('click', () => {
+        // 停止当前播放
+        if (state.isPlaying) {
+          el.originalCompareVideo.pause();
+          el.compressedCompareVideo.pause();
+          state.isPlaying = false;
+        }
+        // 重置状态
+        state.videoInfo = null;
+        state.result = null;
+        state.isCompressing = false;
+        el.fileInput.value = '';
+        el.compareContainer.classList.add('hidden');
+        el.previewContainer.classList.remove('hidden');
+        el.resultInfo.classList.add('hidden');
+        updateUI();
+      });
+
+      // 播放控制
+      el.playPauseBtn.addEventListener('click', togglePlayPause);
+      syncVideos();
+
+      // GPU 信息
+      el.gpuInfoBtn.addEventListener('click', showGPUDetails);
+      el.closeGpuModal.addEventListener('click', () => {
+        el.gpuModal.classList.add('hidden');
+        el.gpuModal.classList.remove('flex');
+      });
+      el.gpuModal.addEventListener('click', (e) => {
+        if (e.target === el.gpuModal) {
+          el.gpuModal.classList.add('hidden');
+          el.gpuModal.classList.remove('flex');
+        }
+      });
+
+      // 页面可见性变化处理
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          // 页面切换到后台
+          if (state.isCompressing) {
+            el.backgroundNotice.classList.add('show');
+          }
+        } else {
+          // 页面切换到前台
+          el.backgroundNotice.classList.remove('show');
+        }
+      });
+
+      updateSettings();
+      detectGPU();
+    }
+
+    init();
+  </script>
+</body>
+</html>
