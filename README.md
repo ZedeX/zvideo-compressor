@@ -2,6 +2,10 @@
 
 纯前端视频压缩工具，使用 WebCodecs API + mp4-muxer，视频不离开您的设备，100% 隐私安全。
 
+## 在线访问
+
+https://zedex.github.io/zvideo-compressor/
+
 ## 功能特性
 
 - 🚀 **纯前端处理** - 视频文件不上传服务器，保护隐私
