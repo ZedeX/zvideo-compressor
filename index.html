@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>视频压缩工具 - WebCodecs 纯前端转码</title>
+  <title>视频压缩工具 - WebCodecs 纯前端转码 (Mediabunny)</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mediabunny@1.40.1/dist/bundles/mediabunny.cjs"></script>
   <style>
     :root {
       --primary: #6366f1;
@@ -330,7 +330,7 @@
         </div>
         <div>
           <h1 class="text-lg font-bold">视频压缩工具</h1>
-          <p class="text-xs text-zinc-400">WebCodecs 纯前端转码</p>
+          <p class="text-xs text-zinc-400">WebCodecs + Mediabunny</p>
         </div>
       </div>
 
@@ -401,7 +401,7 @@
     <!-- 主标题 -->
     <div class="mb-8 text-center">
       <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">纯前端视频压缩</h2>
-      <p class="mt-2 text-zinc-400">使用 WebCodecs API + mp4-muxer，视频不离开您的设备，100% 隐私安全</p>
+      <p class="mt-2 text-zinc-400">使用 WebCodecs API + Mediabunny，视频不离开您的设备，100% 隐私安全</p>
     </div>
 
     <!-- 主要内容区 -->
@@ -671,6 +671,7 @@
                 <option value="480p">480p (854x480)</option>
                 <option value="360p">360p (640x360)</option>
               </select>
+              <p id="resolutionHint" class="text-xs text-yellow-500 hidden"></p>
             </div>
 
             <!-- 视频比特率 -->
@@ -680,6 +681,7 @@
                 <span id="bitrateValue" class="text-sm font-medium">2500 kbps</span>
               </div>
               <input type="range" id="bitrateSlider" min="100" max="20000" step="50" value="2500">
+              <p id="bitrateHint" class="text-xs text-yellow-500 hidden"></p>
             </div>
 
             <!-- 帧率 -->
@@ -688,7 +690,8 @@
                 <label class="text-sm font-medium">输出帧率</label>
                 <span id="fpsValue" class="text-sm font-medium">30 FPS</span>
               </div>
-              <input type="range" id="fpsSlider" min="15" max="60" step="5" value="30">
+              <input type="range" id="fpsSlider" min="10" max="60" step="1" value="30">
+              <p id="fpsHint" class="text-xs text-yellow-500 hidden"></p>
             </div>
 
             <hr class="border-zinc-800">
@@ -939,36 +942,35 @@
     };
 
     // ==================== 质量预设配置 ====================
-    // 注意：这些是相对比例，实际值会根据原始视频属性进行计算且不超过原始值
     const PRESET_CONFIGS = {
       low: {
         name: '高压缩',
-        bitrateMultiplier: 0.3, // 原始码率的30%
-        resolutionScale: 0.5,   // 原始分辨率的50%
-        fpsMultiplier: 1,        // 保持原始帧率（但不超过30）
-        maxBitrate: 1500,        // 最高1500kbps
-        maxResolution: '720p',   // 最高720p
-        maxFps: 30,
+        targetBitrate: 600,
+        targetResolution: '360p',
+        targetFps: 15,
+        maxBitrate: 600,
+        maxResolution: '360p',
+        maxFps: 15,
         description: '文件最小，适合快速分享'
       },
       medium: {
         name: '平衡',
-        bitrateMultiplier: 0.5,
-        resolutionScale: 0.75,
-        fpsMultiplier: 1,
-        maxBitrate: 3500,
-        maxResolution: '1080p',
-        maxFps: 30,
+        targetBitrate: 800,
+        targetResolution: '480p',
+        targetFps: 18,
+        maxBitrate: 800,
+        maxResolution: '480p',
+        maxFps: 18,
         description: '质量与大小的平衡'
       },
       high: {
         name: '高质量',
-        bitrateMultiplier: 0.8,
-        resolutionScale: 1,
-        fpsMultiplier: 1,
-        maxBitrate: 8000,
-        maxResolution: 'original',
-        maxFps: 60,
+        targetBitrate: 1000,
+        targetResolution: '720p',
+        targetFps: 24,
+        maxBitrate: 1000,
+        maxResolution: '720p',
+        maxFps: 24,
         description: '接近原画质'
       },
       custom: null
@@ -1027,6 +1029,9 @@
       bitrateValue: $('bitrateValue'),
       fpsSlider: $('fpsSlider'),
       fpsValue: $('fpsValue'),
+      fpsHint: $('fpsHint'),
+      bitrateHint: $('bitrateHint'),
+      resolutionHint: $('resolutionHint'),
       compressBtn: $('compressBtn'),
       cancelBtn: $('cancelBtn'),
       newVideoBtn: $('newVideoBtn'),
@@ -1132,66 +1137,38 @@
       const preset = PRESET_CONFIGS[presetKey];
       if (!preset || presetKey === 'custom') return null;
 
-      // 原始视频属性
       const originalBitrate = videoInfo.bitrate || 5000;
       const originalWidth = videoInfo.width;
       const originalHeight = videoInfo.height;
       const originalFps = videoInfo.fps || 30;
 
-      // 计算目标比特率：基于原始的比例，但不超过预设最大值，也不超过原始
-      let targetBitrate = Math.min(
-        originalBitrate * preset.bitrateMultiplier,
-        preset.maxBitrate,
-        originalBitrate
-      );
+      let targetBitrate = Math.min(preset.targetBitrate, originalBitrate);
 
-      // 计算目标分辨率
-      let targetRes;
-      if (preset.maxResolution === 'original') {
-        targetRes = 'original';
-      } else {
-        const maxResSize = resolutionToSize(preset.maxResolution, originalWidth, originalHeight);
-        const scaledWidth = originalWidth * preset.resolutionScale;
-        // 选择不超过 scaledWidth 和 maxResSize 的标准分辨率
-        targetRes = selectResolutionByWidth(
-          Math.min(scaledWidth, maxResSize.width),
-          originalWidth,
-          originalHeight
-        );
-      }
+      let targetRes = preset.targetResolution;
       targetRes = clampResolution(targetRes, originalWidth, originalHeight);
 
-      // 计算目标帧率：不超过原始，也不超过预设最大值
-      const targetFps = Math.min(
-        Math.round(originalFps * preset.fpsMultiplier),
-        preset.maxFps,
-        originalFps
-      );
-
-      // 根据分辨率调整比特率范围
-      const bitrateRange = getBitrateRangeForResolution(targetRes);
-      targetBitrate = Math.max(bitrateRange.min, Math.min(targetBitrate, bitrateRange.max));
+      let targetFps = Math.min(preset.targetFps, originalFps);
+      targetFps = Math.max(10, targetFps);
 
       return {
         bitrate: Math.round(targetBitrate),
         resolution: targetRes,
-        fps: Math.max(15, targetFps),
+        fps: targetFps,
         fromPreset: presetKey
       };
     }
 
     // 根据目标文件大小计算最佳参数
-    function calculateParamsForTargetSize(targetSizeBytes, videoInfo, platformConfig = null) {
+    function calculateParamsForTargetSize(targetSizeBytes, videoInfo, platformConfig = null, maxSizeMB = null) {
       if (!videoInfo) return null;
 
       const duration = videoInfo.duration;
-      const audioBitrate = state.settings.audioBitrate || 128; // kbps
+      const audioBitrate = state.settings.audioBitrate || 128;
       const originalWidth = videoInfo.width;
       const originalHeight = videoInfo.height;
       const originalBitrate = videoInfo.bitrate || 5000;
       const originalFps = videoInfo.fps || 30;
 
-      // 从平台配置获取限制
       let maxBitrate = Infinity;
       let maxResolution = '8k';
       let maxFps = 120;
@@ -1208,30 +1185,34 @@
         recommendedFps = platformConfig.fps || 30;
       }
 
-      // 计算目标帧率（先确定帧率，因为它会影响比特率计算）
       let targetFps;
       if (recommendedFps) {
         targetFps = Math.min(recommendedFps, originalFps, maxFps);
+      } else if (maxSizeMB !== null) {
+        if (maxSizeMB <= 10) {
+          targetFps = Math.min(15, originalFps);
+        } else if (maxSizeMB <= 20) {
+          targetFps = Math.min(18, originalFps);
+        } else if (maxSizeMB <= 50) {
+          targetFps = Math.min(20, originalFps);
+        } else {
+          targetFps = Math.min(24, originalFps);
+        }
       } else {
-        targetFps = Math.min(30, originalFps, maxFps);
+        targetFps = Math.min(24, originalFps, maxFps);
       }
-      targetFps = Math.max(15, targetFps); // 最低15fps
+      targetFps = Math.max(10, targetFps);
 
-      // 帧率比例因子（相对于30fps）
       const fpsFactor = targetFps / 30;
 
-      // 计算可用于视频的总比特率，考虑帧率影响
-      // 公式: 总比特率 = (目标大小 × 8 / 时长) / 帧率因子
-      const safetyMargin = 0.93; // 留出 7% 余量
-      const totalBitrate = (targetSizeBytes * 8 * safetyMargin) / duration / 1000 / fpsFactor; // kbps
+      const safetyMargin = 0.93;
+      const totalBitrate = (targetSizeBytes * 8 * safetyMargin) / duration / 1000 / fpsFactor;
       let videoBitrate = Math.max(100, totalBitrate - audioBitrate);
 
-      // 根据比特率选择合适的分辨率（从低到高尝试）
       let resolution;
       if (recommendedResolution) {
         resolution = clampResolution(recommendedResolution, originalWidth, originalHeight);
       } else {
-        // 根据比特率自动选择（考虑帧率因子后的有效比特率）
         const effectiveBitrate = videoBitrate * fpsFactor;
         if (effectiveBitrate >= 15000) {
           resolution = '4k';
@@ -1247,7 +1228,6 @@
         resolution = clampResolution(resolution, originalWidth, originalHeight);
       }
 
-      // 确保分辨率不超过平台限制
       resolution = clampResolution(resolution, originalWidth, originalHeight);
       const maxResSize = resolutionToSize(maxResolution, originalWidth, originalHeight);
       const currentResSize = resolutionToSize(resolution, originalWidth, originalHeight);
@@ -1255,27 +1235,22 @@
         resolution = clampResolution(maxResolution, originalWidth, originalHeight);
       }
 
-      // 获取该分辨率的合理比特率范围
       const bitrateRange = getBitrateRangeForResolution(resolution);
 
-      // 如果有推荐比特率，优先使用
       if (recommendedBitrate) {
         const recSize = ((recommendedBitrate * fpsFactor + audioBitrate) * duration * 1000) / 8;
-        if (recSize <= targetSizeBytes * 1.1) { // 允许超10%
+        if (recSize <= targetSizeBytes * 1.1) {
           videoBitrate = recommendedBitrate;
         }
       }
 
-      // 限制比特率在合理范围内（不乘以fpsFactor，因为fpsFactor已经在前期计算过了）
       videoBitrate = Math.max(bitrateRange.min, Math.min(videoBitrate, bitrateRange.max, maxBitrate, originalBitrate));
 
-      // 如果即使最小比特率也超出目标大小，尝试降低帧率
       let currentEstSize = ((videoBitrate * fpsFactor + audioBitrate) * duration * 1000) / 8;
-      if (currentEstSize > targetSizeBytes && targetFps > 15) {
-        // 尝试降低帧率
-        const fpsOptions = [25, 20, 15];
+      if (currentEstSize > targetSizeBytes && targetFps > 10) {
+        const fpsOptions = [20, 18, 15, 12, 10];
         for (const testFps of fpsOptions) {
-          if (testFps >= originalFps) continue; // 不能超过原始帧率
+          if (testFps >= originalFps) continue;
           const testFpsFactor = testFps / 30;
           const testSize = ((videoBitrate * testFpsFactor + audioBitrate) * duration * 1000) / 8;
           if (testSize <= targetSizeBytes) {
@@ -1370,10 +1345,10 @@
       if (!state.videoInfo) return;
 
       state.selectedMaxSize = maxSizeMB;
-      state.selectedPlatform = null; // 清除平台选择
+      state.selectedPlatform = null;
 
       const targetSizeBytes = maxSizeMB * 1024 * 1024;
-      const params = calculateParamsForTargetSize(targetSizeBytes, state.videoInfo);
+      const params = calculateParamsForTargetSize(targetSizeBytes, state.videoInfo, null, maxSizeMB);
 
       if (params) {
         state.settings.bitrate = params.bitrate;
@@ -1726,6 +1701,30 @@
       }
     }
 
+    function clearAllSelections() {
+      state.selectedPlatform = null;
+      state.selectedMaxSize = null;
+      el.platformHint.classList.add('hidden');
+      el.sizeHint.classList.add('hidden');
+      el.platformBtns.forEach(b => {
+        b.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+        b.classList.add('border-zinc-700');
+      });
+      el.sizeBtns.forEach(b => {
+        b.classList.remove('border-green-500', 'bg-green-500/10');
+        b.classList.add('border-zinc-700');
+      });
+      el.presetBtns.forEach(b => {
+        b.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+        b.classList.add('border-zinc-700');
+      });
+    }
+
+    function showCustomWarning() {
+      el.presetHint.textContent = '已切换为自定义模式，参数可能与平台要求或预期大小不符';
+      el.presetHint.classList.remove('hidden');
+    }
+
     function updateSettings() {
       const { settings } = state;
 
@@ -1743,12 +1742,47 @@
         btn.classList.toggle('border-zinc-700', !isActive);
       });
 
-      const isCustom = settings.quality === 'custom';
-      el.resolutionSelect.disabled = !isCustom;
-      el.bitrateSlider.disabled = !isCustom;
-      el.fpsSlider.disabled = !isCustom;
-
+      updateQualityWarnings();
       updateUI();
+    }
+
+    function updateQualityWarnings() {
+      const { settings, videoInfo } = state;
+
+      el.fpsHint.classList.add('hidden');
+      el.bitrateHint.classList.add('hidden');
+      el.resolutionHint.classList.add('hidden');
+
+      if (videoInfo) {
+        const originalFps = videoInfo.fps || 30;
+        const originalBitrate = videoInfo.bitrate || 5000;
+        const originalPixels = videoInfo.width * videoInfo.height;
+
+        const resMap = { '360p': 640 * 360, '480p': 854 * 480, '720p': 1280 * 720, '1080p': 1920 * 1080, '4k': 3840 * 2160, '8k': 7680 * 4320 };
+        const currentPixels = resMap[settings.resolution] || originalPixels;
+
+        if (settings.fps < 20) {
+          el.fpsHint.textContent = '⚠️ 帧率较低，播放可能出现卡顿';
+          el.fpsHint.classList.remove('hidden');
+        }
+
+        if (settings.bitrate < 1000 || (currentPixels > 0 && settings.bitrate < currentPixels / 1000)) {
+          el.bitrateHint.textContent = '⚠️ 比特率较低，画面可能出现马赛克或失真';
+          el.bitrateHint.classList.remove('hidden');
+        }
+
+        if (currentPixels < originalPixels * 0.25 && currentPixels < 480 * 854) {
+          el.resolutionHint.textContent = '⚠️ 分辨率较低，画面可能出现模糊';
+          el.resolutionHint.classList.remove('hidden');
+        }
+      }
+
+      if (settings.quality === 'custom') {
+        el.presetHint.textContent = '已切换为自定义模式，参数可能与平台要求或预期大小不符';
+        el.presetHint.classList.remove('hidden');
+      } else {
+        el.presetHint.classList.add('hidden');
+      }
     }
 
     // 更新进度显示
@@ -1995,32 +2029,33 @@
     async function compressWithWebCodecs(targetWidth, targetHeight, startTime) {
       const { videoInfo, settings, abortController, compressionParams } = state;
 
-      // 使用计算后的参数（确保不超过原始）
       const fps = compressionParams?.fps || calculateOutputFps(videoInfo, settings);
       const bitrate = compressionParams?.bitrate || calculateOutputBitrate(videoInfo, settings);
 
-      const MuxerClass = window.Mp4Muxer?.Muxer;
-      const ArrayBufferTargetClass = window.Mp4Muxer?.ArrayBufferTarget;
-
-      if (!MuxerClass || !ArrayBufferTargetClass) {
+      const MB = window.Mediabunny;
+      if (!MB || !MB.Output || !MB.Mp4OutputFormat || !MB.BufferTarget) {
         return await compressWithMediaRecorder(targetWidth, targetHeight, startTime);
       }
 
-      let muxer, target;
+      const { Output, Mp4OutputFormat, BufferTarget, EncodedVideoPacketSource, EncodedPacket } = MB;
+
+      let output, videoPacketSource;
       try {
-        target = new ArrayBufferTargetClass();
-        muxer = new MuxerClass({
-          target,
-          video: { codec: 'avc', width: targetWidth, height: targetHeight },
-          audio: { codec: 'aac', sampleRate: 48000, numberOfChannels: 2 },
-          fastStart: true,
+        output = new Output({
+          format: new Mp4OutputFormat({ fastStart: true }),
+          target: new BufferTarget()
         });
+
+        videoPacketSource = new EncodedVideoPacketSource('avc');
+        output.addVideoTrack(videoPacketSource);
       } catch (e) {
+        console.error('Mediabunny 初始化失败:', e);
         return await compressWithMediaRecorder(targetWidth, targetHeight, startTime);
       }
 
       let encodedFrames = 0;
       const totalFrames = Math.ceil(videoInfo.duration * fps);
+      let isFirstChunk = true;
 
       const codecCandidates = ['avc1.42001E', 'avc1.4D401E', 'avc1.64001E'];
       let supportedCodec = null;
@@ -2036,11 +2071,28 @@
       if (!supportedCodec) throw new Error('浏览器不支持视频编码器');
 
       const videoEncoder = new VideoEncoder({
-        output: (chunk, meta) => {
-          muxer.addVideoChunk(chunk, meta);
-          encodedFrames++;
-          const progress = (encodedFrames / totalFrames) * 100;
-          updateProgress(progress, null);
+        output: async (chunk, meta) => {
+          try {
+            const packet = EncodedPacket.fromEncodedChunk(chunk);
+            if (isFirstChunk) {
+              isFirstChunk = false;
+              await videoPacketSource.add(packet, {
+                decoderConfig: {
+                  codec: supportedCodec,
+                  codedWidth: targetWidth,
+                  codedHeight: targetHeight,
+                  description: meta?.description
+                }
+              });
+            } else {
+              await videoPacketSource.add(packet);
+            }
+            encodedFrames++;
+            const progress = (encodedFrames / totalFrames) * 100;
+            updateProgress(progress, null);
+          } catch (e) {
+            console.error('添加视频包错误:', e);
+          }
         },
         error: (e) => console.error('编码错误:', e)
       });
@@ -2063,7 +2115,6 @@
       canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
 
-      // 预览画布
       const previewCtx = el.previewCanvas.getContext('2d');
 
       const frameInterval = 1 / fps;
@@ -2080,7 +2131,6 @@
 
         ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
 
-        // 更新预览
         previewCtx.drawImage(canvas, 0, 0, el.previewCanvas.width, el.previewCanvas.height);
 
         const frame = new VideoFrame(canvas, {
@@ -2097,8 +2147,8 @@
       await videoEncoder.flush();
       videoEncoder.close();
 
-      muxer.finalize();
-      const buffer = target.buffer;
+      await output.finalize();
+      const buffer = output.target.buffer;
       const blob = new Blob([buffer], { type: 'video/mp4' });
 
       finishCompression(blob);
@@ -2308,20 +2358,29 @@
         });
       });
 
-      // 滑块
+      // 滑块 - 用户手动调整时清除预设/平台/大小选择
       el.bitrateSlider.addEventListener('input', (e) => {
+        const hadSelection = state.selectedPlatform || state.selectedMaxSize || state.settings.quality !== 'custom';
         state.settings.quality = 'custom';
         state.settings.bitrate = parseInt(e.target.value);
+        clearAllSelections();
+        if (hadSelection) showCustomWarning();
         updateSettings();
       });
       el.fpsSlider.addEventListener('input', (e) => {
+        const hadSelection = state.selectedPlatform || state.selectedMaxSize || state.settings.quality !== 'custom';
         state.settings.quality = 'custom';
         state.settings.fps = parseInt(e.target.value);
+        clearAllSelections();
+        if (hadSelection) showCustomWarning();
         updateSettings();
       });
       el.resolutionSelect.addEventListener('change', (e) => {
+        const hadSelection = state.selectedPlatform || state.selectedMaxSize || state.settings.quality !== 'custom';
         state.settings.quality = 'custom';
         state.settings.resolution = e.target.value;
+        clearAllSelections();
+        if (hadSelection) showCustomWarning();
         updateSettings();
       });
 
