@@ -1,65 +1,79 @@
-# zvideo-compressor
+# Frontend Video Compress
 
-纯前端视频压缩工具，使用 WebCodecs API + Mediabunny，视频不离开您的设备，100% 隐私安全。
+A pure frontend video compression tool using WebCodecs API. Videos never leave your device - 100% privacy secure.
 
-## 在线访问
+## Live Demo
 
-https://zedex.github.io/zvideo-compressor/
+https://zedex.github.io/Frontend-video-compress-codex/
 
-## 功能特性
+## Features
 
-- 🚀 **纯前端处理** - 视频文件不上传服务器，保护隐私
-- ⚡ **WebCodecs API** - 高性能硬件加速编码
-- 🎨 **直观界面** - 拖拽上传，实时预览
-- 🔧 **自定义参数** - 分辨率、比特率、帧率可调
-- 📊 **对比预览** - 压缩前后效果实时对比
-- 💾 **本地下载** - 一键导出 MP4 文件
+- 🚀 **Pure Frontend Processing** - Videos are processed locally, never uploaded to any server
+- ⚡ **WebCodecs API** - High-performance hardware-accelerated encoding
+- 🎨 **Intuitive Interface** - Drag and drop upload with real-time preview
+- 🔧 **Customizable Parameters** - Adjustable resolution, bitrate, and frame rate
+- 📊 **Comparison Preview** - Side-by-side comparison before and after compression
+- 💾 **Local Download** - One-click export to MP4 file
 
-## 压缩预设
+## Platform Presets
 
-| 预设 | 分辨率 | 比特率 | 帧率 | 适用场景 |
-|------|--------|--------|------|----------|
-| 高压缩 | 360p | 600kbps | 15fps | 文件最小，适合快速分享 |
-| 平衡 | 480p | 800kbps | 18fps | 质量与大小的平衡 |
-| 高质量 | 720p | 1000kbps | 24fps | 接近原画质 |
+Built-in presets for popular platforms:
 
-## 文件大小限制
+| Platform | Max Size | Resolution | Notes |
+|----------|----------|------------|-------|
+| WeChat Moments | 10MB | 1080p | Portrait recommended |
+| WeChat Chat | 100MB | 720p | - |
+| Xiaohongshu | 500MB | 4K | Portrait recommended |
+| TikTok/Douyin | 500MB | 4K | Portrait required |
+| Bilibili | 4GB | 8K | Supports 120fps |
+| YouTube | 128GB | 8K | - |
+| Twitter/X | 512MB | 1080p | Max 2min 20sec |
+| Instagram | 100MB | 1080p | Portrait recommended |
+| Discord | 25MB | 720p | Nitro: 500MB |
+| Telegram | 2GB | 4K | - |
 
-| 限制 | 目标帧率 |
-|------|----------|
-| 10MB | 15fps |
-| 20MB | 18fps |
-| 50MB | 20fps |
-| 100MB+ | 24fps |
+## Compression Presets
 
-## 浏览器支持
+| Preset | Resolution | Bitrate | Frame Rate | Use Case |
+|--------|------------|---------|------------|----------|
+| High Compression | 360p | 600kbps | 15fps | Smallest file size |
+| Balanced | 480p | 800kbps | 18fps | Quality vs size balance |
+| High Quality | 720p | 1000kbps | 24fps | Near original quality |
 
-需要支持 WebCodecs API 的现代浏览器：
+## Browser Support
+
+Requires modern browsers with WebCodecs API support:
 
 - Chrome 94+
 - Edge 94+
-- 其他基于 Chromium 的浏览器
+- Other Chromium-based browsers
 
-## 使用方法
+## Usage
 
-1. 打开 `index.html` 或访问在线版本
-2. 拖拽或点击选择视频文件
-3. 选择分享平台、文件大小限制或压缩质量预设
-4. 或手动调整分辨率、比特率、帧率参数
-5. 点击"开始压缩"
-6. 处理完成后下载压缩后的视频
+1. Open `index.html` or visit the live demo
+2. Drag and drop or click to select a video file
+3. Choose a platform preset, file size limit, or compression quality
+4. Or manually adjust resolution, bitrate, and frame rate
+5. Click "Start Compression"
+6. Download the compressed video when complete
 
-## 技术栈
+## Tech Stack
 
 - HTML5 + CSS3 + JavaScript (Vanilla)
-- [Tailwind CSS](https://tailwindcss.com/) - 样式框架
-- [Mediabunny](https://mediabunny.dev/) - MP4 容器封装
-- WebCodecs API - 视频编解码
+- [Tailwind CSS](https://tailwindcss.com/) - Styling framework
+- [Mediabunny](https://mediabunny.dev/) - MP4 container muxing
+- WebCodecs API - Video encoding/decoding
 
-## 本地开发
+## Local Development
 
-直接在浏览器中打开 `index.html` 即可使用，无需构建工具。
+Simply open `index.html` in your browser. No build tools required.
 
-## 许可证
+## Files
+
+- `index.html` - Main application (Mediabunny version)
+- `index-mp4-muxer.html` - Alternative version using mp4-muxer
+- `favicon.svg` - Site icon
+
+## License
 
 MIT License
